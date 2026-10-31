@@ -1,5 +1,5 @@
 import os, sqlite3, secrets, time, hmac, hashlib, base64, json
-from flask import Flask, request, render_template_string, make_response
+from flask import Flask, request, render_template_string, make_response, Response
 from markupsafe import escape
 
 app = Flask(__name__)
@@ -17,12 +17,21 @@ PAGE = """<!doctype html><meta name=viewport content="width=device-width,initial
 <style>body{font-family:system-ui;max-width:640px;margin:20px auto;padding:0 14px;background:#0f1420;color:#e6e9f2;line-height:1.5}
 input,button{font:inherit;padding:9px;margin:4px 0;border-radius:6px;border:1px solid #33405f;background:#1b2236;color:#e6e9f2}
 button{background:#4a6cf7;border:0;font-weight:600}a{color:#8fb0ff}pre{background:#1b2236;padding:10px;border-radius:6px;overflow-x:auto;white-space:pre-wrap}
-.ok{color:#4cd39b}.bad{color:#ff6b78}</style>
+.ok{color:#4cd39b}.bad{color:#ff6b78}.tag{display:inline-block;font-size:.78rem;padding:1px 7px;border-radius:999px;background:#242c42;color:#9fb0d6;margin-left:6px}
+.diff-easy{color:#4cd39b}.diff-medium{color:#f1c40f}.diff-hard{color:#ff6b78}
+.bar{height:8px;border-radius:999px;background:#1b2236;overflow:hidden;margin:10px 0}
+.bar>div{height:100%;background:#4a6cf7}
+.ts{color:#7c879f;font-size:.82rem}</style>
 <h1>{{ title }}</h1>
 {% if kind == 'home' %}
   <p>Local CTF lab. Solve the challenges, then submit the flag.</p>
+  <p>{{ solved|length }}/{{ challenges|length }} solved</p>
+  <div class="bar"><div style="width:{{ (solved|length * 100 // challenges|length) if challenges|length else 0 }}%"></div></div>
   <ul>{% for cid, name, url in challenges %}
-    <li><a href="{{ url }}">{{ name }}</a> {% if cid in solved %}<span class="ok">solved</span>{% endif %}</li>
+    <li><a href="{{ url }}">{{ name }}</a>
+      {% if cid in meta %}<span class="tag diff-{{ meta[cid][0]|lower }}">{{ meta[cid][0] }}</span><span class="tag">{{ meta[cid][1] }}</span>{% endif %}
+      {% if cid in solved %}<span class="ok"> solved</span> <span class="ts">({{ solved[cid] }})</span>{% endif %}
+    </li>
   {% endfor %}</ul>
   <form method="post" action="/submit"><input name="flag" placeholder="FLAG{...}" autocomplete="off"><button>Submit flag</button></form>
   {% if msg %}<p class="{{ cls }}">{{ msg }}</p>{% endif %}
@@ -36,6 +45,14 @@ button{background:#4a6cf7;border:0;font-weight:600}a{color:#8fb0ff}pre{backgroun
   <p><a href="/">Back to scoreboard</a> | <a href="{{ other }}">{{ other_name }}</a></p>
 {% endif %}"""
 
+
+META = {
+    "c1": ("Easy", "A03: Injection"),
+    "c2": ("Easy", "A03: Injection (XSS)"),
+    "c3": ("Medium", "A01: Broken Access Control"),
+    "c4": ("Medium", "A02/A07: Identification & Auth Failures"),
+}
+
 def conn():
     return sqlite3.connect(DB)
 
@@ -48,15 +65,40 @@ def init():
     c.execute("INSERT INTO users(username, password) VALUES('guest', 'guest123')")
     c.commit(); c.close()
 
-def solved_set():
+def solved_map():
     c = conn()
-    s = {r[0] for r in c.execute("SELECT challenge FROM solves")}
+    rows = c.execute("SELECT challenge, ts FROM solves").fetchall()
     c.close()
-    return s
+    return {cid: time.strftime("%d %b %H:%M", time.localtime(ts)) for cid, ts in rows}
 
 def home(msg="", cls=""):
     return render_template_string(PAGE, kind="home", title="CTF Lab", challenges=CHALLENGES,
-                                  solved=solved_set(), msg=msg, cls=cls)
+                                  solved=solved_map(), meta=META, msg=msg, cls=cls)
+
+@app.after_request
+def no_cache(resp):
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+RATE_WINDOW = 10
+RATE_MAX = 20
+_hits = {}
+
+def rate_limited():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    now = time.time()
+    arr = [t for t in _hits.get(ip, []) if now - t < RATE_WINDOW]
+    arr.append(now)
+    _hits[ip] = arr
+    if len(_hits) > 3000:
+        _hits.clear()
+    return len(arr) > RATE_MAX
+
+@app.before_request
+def _rate_guard():
+    if rate_limited():
+        return "Too many requests, slow down.", 429
 
 @app.route("/")
 def index():
@@ -249,6 +291,7 @@ def c4_fl():
 @app.route("/c4/fixed/admin")
 def c4_fa():
     return c4_admin(False)
+
 
 init()
 if __name__ == "__main__":

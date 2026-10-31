@@ -3,3 +3,4 @@ __pycache__/
 ctf.db
 *.env
 *.bak*
+secret_internal.txt
