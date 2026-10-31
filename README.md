@@ -1,5 +1,7 @@
 # CTF Lab
 
+**Live demo:** https://ctf-lab-x87i.onrender.com/c1/login (SQLi, XSS, IDOR challenges; JWT challenge is local-only, see below)
+
 A small local CTF: 4 classic web vulnerabilities, each with a vulnerable version and a fixed version side by side.
 
 > Educational project. Runs locally only (`127.0.0.1`). Fake data, fake "admin" account, nothing real.
