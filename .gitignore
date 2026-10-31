@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+ctf.db
+*.env
+*.bak*
